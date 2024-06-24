@@ -1,14 +1,12 @@
-import datetime
 import os
 from typing import List, Dict, Union
 
 import jinja2.exceptions
-from flask import request, redirect, url_for, render_template, Response, session, abort, send_from_directory
-from pony.orm import count, commit, db_session
+from flask import render_template, Response, session, send_from_directory
 
 from worlds.AutoWorld import AutoWorldRegister
 from . import app, cache
-from .models import Seed, Room, Command, UUID, uuid4
+from .models import uuid4
 
 
 def get_world_theme(game_name: str):
@@ -30,13 +28,6 @@ def page_not_found(err):
     return render_template('404.html'), 404
 
 
-# Start Playing Page
-@app.route('/start-playing')
-@cache.cached()
-def start_playing():
-    return render_template(f"startPlaying.html")
-
-
 # Game Info Pages
 @app.route('/games/<string:game>/info/<string:lang>')
 @cache.cached()
@@ -45,7 +36,7 @@ def game_info(game, lang):
 
 
 # List of supported games
-@app.route('/games')
+@app.route('/')
 @cache.cached()
 def games():
     worlds = {}
@@ -67,90 +58,16 @@ def tutorial_landing():
     return render_template("tutorialLanding.html")
 
 
-@app.route('/faq/<string:lang>/')
-@cache.cached()
-def faq(lang):
-    return render_template("faq.html", lang=lang)
-
-
 @app.route('/glossary/<string:lang>/')
 @cache.cached()
 def terms(lang):
     return render_template("glossary.html", lang=lang)
 
 
-@app.route('/seed/<suuid:seed>')
-def view_seed(seed: UUID):
-    seed = Seed.get(id=seed)
-    if not seed:
-        abort(404)
-    return render_template("viewSeed.html", seed=seed, slot_count=count(seed.slots))
-
-
-@app.route('/new_room/<suuid:seed>')
-def new_room(seed: UUID):
-    seed = Seed.get(id=seed)
-    if not seed:
-        abort(404)
-    room = Room(seed=seed, owner=session["_id"], tracker=uuid4())
-    commit()
-    return redirect(url_for("host_room", room=room.id))
-
-
-def _read_log(path: str):
-    if os.path.exists(path):
-        with open(path, encoding="utf-8-sig") as log:
-            yield from log
-    else:
-        yield f"Logfile {path} does not exist. " \
-              f"Likely a crash during spinup of multiworld instance or it is still spinning up."
-
-
-@app.route('/log/<suuid:room>')
-def display_log(room: UUID):
-    room = Room.get(id=room)
-    if room is None:
-        return abort(404)
-    if room.owner == session["_id"]:
-        file_path = os.path.join("logs", str(room.id) + ".txt")
-        if os.path.exists(file_path):
-            return Response(_read_log(file_path), mimetype="text/plain;charset=UTF-8")
-        return "Log File does not exist."
-
-    return "Access Denied", 403
-
-
-@app.route('/room/<suuid:room>', methods=['GET', 'POST'])
-def host_room(room: UUID):
-    room: Room = Room.get(id=room)
-    if room is None:
-        return abort(404)
-    if request.method == "POST":
-        if room.owner == session["_id"]:
-            cmd = request.form["cmd"]
-            if cmd:
-                Command(room=room, commandtext=cmd)
-                commit()
-        return redirect(url_for("host_room", room=room.id))
-
-    now = datetime.datetime.utcnow()
-    # indicate that the page should reload to get the assigned port
-    should_refresh = not room.last_port and now - room.creation_time < datetime.timedelta(seconds=3)
-    with db_session:
-        room.last_activity = now  # will trigger a spinup, if it's not already running
-
-    return render_template("hostRoom.html", room=room, should_refresh=should_refresh)
-
-
 @app.route('/favicon.ico')
 def favicon():
     return send_from_directory(os.path.join(app.root_path, "static", "static"),
                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
-
-
-@app.route('/discord')
-def discord():
-    return redirect("https://discord.gg/8Z65BR2")
 
 
 @app.route('/datapackage')
